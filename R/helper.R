@@ -46,19 +46,18 @@ diff <- function(leftside, codeline, indep_vars, dep_var, fl, jac_mat) {
   fct <- function() {stop("something went wrong")}
   body(fct, envir = environment(fct)) <- codeline
   ret <- lapply(indep_vars, function(inp) {
-    const <- new.env()
-    const$const <- FALSE
-    df <- d(fct, !!inp, fl, const)
+    df <- d(fct, !!inp, fl) 
     cl <- call("=", leftside, codeline)
-    if(const$const) return(NULL)
     if(length(leftside) == 1 && length(inp)) {
       jac_mat <- paste0(jac_mat, "[1, 1]")
     } else if(length(leftside) >= 3 && length(inp) >= 3) {
       fct_index <- leftside[[3]]
       indep_index <- inp[[3]]
-      jac_mat <- paste0(jac_mat, "[", indep_index, ",", fct_index, "]")
+      jac_mat <- paste0(jac_mat, "[", fct_index, ",", indep_index, "]")
     }
-    deriv <- call("=", str2lang(jac_mat), body(df))
+    
+    if(body(df) == 0) return(NULL)
+    deriv <- call("=", str2lang(jac_mat), simplify_expr(body(df)))
     return(deriv)
   })
   
@@ -218,7 +217,6 @@ ReplaceIt <- R6::R6Class("ReplaceIt",
           
           if(deparse(x) == self$to_replace) {
             x = str2lang(bquote(.(self$replace_with)))
-              #str2lang(paste0("(", self$replace_with, ")"))
           }
           return(x)
         } else {
@@ -239,10 +237,6 @@ ReplaceIt <- R6::R6Class("ReplaceIt",
   ) # end public
   
 )
-
-
-
-
 
 replace_all <- function(b, to_replace, replace_with) {
   r <- ReplaceIt$new(to_replace, replace_with)
@@ -286,10 +280,13 @@ Unfold <- R6::R6Class(
           df <- diff(ls, codeline, self$to_diff, self$y, self$fl, self$jac_mat)
           results[[counter]] <- code[[i]]
           counter <- counter + 1
-          for(j in seq_along(1:length(df))) {
-            results[[counter]] <- df[[j]]
-            counter <- counter + 1
+          if(!is.null(df)) {
+            for(j in seq_along(1:length(df))) {
+              results[[counter]] <- df[[j]]
+              counter <- counter + 1
+            }  
           }
+          
         } else {
           results[[counter]] <- code[[i]]
           counter <- counter + 1
@@ -323,3 +320,4 @@ Unfold <- R6::R6Class(
   ) # end public list
   
 )
+

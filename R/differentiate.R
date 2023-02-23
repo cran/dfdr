@@ -9,40 +9,7 @@ lift <- function(f) {
   function(x, ...) if (rlang::is_null(x)) x else f(x, ...)
 }
 
-#' Differentiate a function for a single variable.
-#'
-#' @param f The function to differentiate.
-#' @param x The variable that f should be differentiated with respect to.
-#' @param derivs An S4 class of type \emph{fcts} that defines additional derivatives. See \code{\link{fcts}} for details.
-#' @param const is a variable which is used internally by \code{\link{jacobian}()}. A environment is expected which holds a logical value called \emph{const}. \cr
-#'              In case a function is found which should be ignored the value of \emph{const} is set to TRUE.
-#'              
-#' @details 
-#' The following functions are already supported: \cr
-#' sin, sinh, asin, cos, cosh, acos, tan, tanh, atan, exp, log, sqrt, c, vector, numeric, rep and matrix. \cr
-#' Notably, for the functions: c, vector, numeric, rep and matrix the function is ignored during differentiation.              
-#'              
-#' @return For example function f and symbol x: \cr
-#' \emph{df/dx}
-#' @examples 
-#' library(dfdr)
-#' d(sin, x)
-#' 
-#' f <- function(x) -sin(x)
-#' d(f, x)
-#' 
-#' # Initialize list
-#' lst <- dfdr::fcts()
-#' # The function which should be added
-#' f <- function(x) x^2
-#' # The dervative function of f
-#' f_deriv <- function(x) 2*x
-#' # add new entry to list
-#' lst <- fcts_add_fct(lst, f, f_deriv)
-#' g <- function(z) f(z)
-#' d(g, z, lst)
-#' @export
-d <- function(f, x, derivs = NULL, const = NULL) {
+d <- function(f, x, derivs = NULL) {
   x <- rlang::enexpr(x)
   fl <- init_fct_list()
   if(!is.null(derivs)) {
@@ -52,9 +19,6 @@ d <- function(f, x, derivs = NULL, const = NULL) {
     }
   }
   
-  if(is.null(const)) const <- new.env()
-  const$const <- FALSE
-
   # Primitive functions, we have to treat carefully. They don't have a body.
   # This is just a short list of such built-in arithmetic functions, it is
   # not exhaustive.
@@ -77,7 +41,7 @@ d <- function(f, x, derivs = NULL, const = NULL) {
     # for other functions we have to parse the body
     # and differentiate it.
     df <- f
-    body(df) <- simplify_expr(diff_expr(body(f), x, fl, const)) 
+    body(df) <- simplify_expr(diff_expr(body(f), x, fl)) 
     df
   }
 }
@@ -89,7 +53,7 @@ diff_vector_out <- function(expr, x, fl) {
   as.call(c(as.name("c"), d_args))
 }
 
-diff_expr <- lift(function(expr, x, fl, const) {
+diff_expr <- lift(function(expr, x, fl) {
   if(is.call(expr)) {
     if(as.name("[") == expr[[1]]) {
       stopifnot("Only integers in [] allowed"=check_bracket(expr))
@@ -106,7 +70,7 @@ diff_expr <- lift(function(expr, x, fl, const) {
     is.numeric(.)              ~ quote(0),
     is.name(.) && . == x       ~ quote(1), 
     is.name(.)                 ~ quote(0),
-    is.call(.)                 ~ diff_call(expr, x, fl, const),
+    is.call(.)                 ~ diff_call(expr, x, fl),
     ~ stop(paste0("Unexpected expression ", deparse(expr), " in parsing.")) # nocov
   )
 })
@@ -151,15 +115,15 @@ diff_exponentiation <- function(expr, x, fl) {
   bquote( .(g) * .(f)**(.(g)-1) * .(df) )
 }
 
-diff_built_in_function_call <- lift(function(expr, x, fl, const) {
+diff_built_in_function_call <- lift(function(expr, x, fl) {
   # chain rule with a known function to differentiate. df/dx = df/dy dy/dx
   name <- call_name(expr)
   keep <- get_keep(fl, name)
   if(keep) {
-    warning(paste("Found function", name,  "which should be kept constant. This function is not considered for calculating the derivatives. Notably, also the arguments of the functions are ignored!") )
-    const$const <- TRUE
-    return(expr)
+    message(paste("Found function", name,  "which should be kept constant. This function is not considered for calculating the derivatives. Notably, also the arguments of the functions are ignored!") )
+    return(0)
   }
+  
   name_deriv <- get_derivative_name(fl, name)
   len <- length(expr)
   args <- sapply(seq_along(2:len), function(x) call_arg(expr, x))
@@ -203,6 +167,10 @@ diff_built_in_function_call <- lift(function(expr, x, fl, const) {
   if(identical(entire_deriv, character(0))) {
     return(str2lang("0"))
   }
+  if(entire_deriv == "") {
+    return(str2lang("0"))
+  }
+
   str2lang(entire_deriv)
 })
 
@@ -215,7 +183,7 @@ diff_parens <- function(expr, x, fl) {
     call("(", subexpr)
 }
 
-diff_call <- lift(function(expr, x, fl, const) {
+diff_call <- lift(function(expr, x, fl) {
   arg1 <- call_arg(expr, 1)
   arg2 <- call_arg(expr, 2)
   call_name(expr) |> purrr::when(
@@ -226,7 +194,7 @@ diff_call <- lift(function(expr, x, fl, const) {
       . == "/" ~ diff_division(expr, x, fl),
       . == "^" ~ diff_exponentiation(expr, x, fl),
       . == "(" ~ diff_parens(expr, x, fl),
-      (as.character(.) %in% get_names(fl)) ~ diff_built_in_function_call(expr, x, fl, const),
+      (as.character(.) %in% get_names(fl)) ~ diff_built_in_function_call(expr, x, fl),
       . == "c" ~ diff_vector_out(expr, x, fl),
       ~ stop(paste("The function", ., "is not supported"))
     ),
